@@ -1,0 +1,16 @@
+name: flutter_glass
+description: Liquid glass shader demo using Flutter Impeller
+publish_to: "none"
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/shaders/liquid_glass.frag
