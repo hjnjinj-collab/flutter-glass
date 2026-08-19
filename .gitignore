@@ -1,0 +1,15 @@
+# Flutter/Dart/Pub build artifacts
+**/build/
+.dart_tool/
+.packages
+.pub-cache/
+
+# IntelliJ related
+*.iml
+.idea/
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
