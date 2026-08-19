@@ -1,0 +1,13 @@
+name: native_glass
+description: A native Windows plugin that renders a GPU-backed liquid glass effect.
+version: 0.0.1
+homepage: https://github.com/hjnjinj-collab/flutter-glass
+environment:
+  sdk: '>=2.18.0 <4.0.0'
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: NativeGlassPlugin
+        fileName: "windows/native_glass.cpp"
