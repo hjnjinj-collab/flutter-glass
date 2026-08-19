@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import 'liquid_glass_painter.dart';
 
@@ -61,12 +62,13 @@ class _LiquidGlassDemoState extends State<LiquidGlassDemo> {
 
   Future<void> _captureScene() async {
     try {
-      final boundary = _sceneKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
-      final image = await boundary.toImage(pixelRatio: ui.window.devicePixelRatio);
-      setState(() {
-        _sceneImage = image;
-      });
+      final renderObject = _sceneKey.currentContext?.findRenderObject();
+      if (renderObject is RenderRepaintBoundary) {
+        final image = await renderObject.toImage(pixelRatio: ui.window.devicePixelRatio);
+        setState(() {
+          _sceneImage = image;
+        });
+      }
     } catch (e) {
       // ignore for demo
     }

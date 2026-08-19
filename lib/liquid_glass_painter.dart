@@ -26,14 +26,29 @@ class LiquidGlassPainter extends CustomPainter {
       0.6, // u_glowStrength
     ]);
 
-    ui.Shader shader;
-    if (sceneImage != null) {
-      // Pass scene image as a sampler uniform to the fragment shader.
-      // FragmentProgram.shader accepts samplerUniforms as a list of Images.
-      shader = program!.shader(floatUniforms: floats, samplerUniforms: [sceneImage!]);
-    } else {
-      // Fallback: no scene image yet — run shader without samplers
-      shader = program!.shader(floatUniforms: floats);
+    ui.Shader? shader;
+
+    // Try multiple FragmentProgram invocation names to maintain compatibility across SDKs
+    final p = program!;
+    try {
+      shader = (p as dynamic).shader(floatUniforms: floats, samplerUniforms: sceneImage != null ? [sceneImage!] : null) as ui.Shader;
+    } catch (_) {}
+    if (shader == null) {
+      try {
+        shader = (p as dynamic).fragmentShader(floatUniforms: floats, samplerUniforms: sceneImage != null ? [sceneImage!] : null) as ui.Shader;
+      } catch (_) {}
+    }
+    if (shader == null) {
+      try {
+        shader = (p as dynamic).instantiate(floatUniforms: floats, samplerUniforms: sceneImage != null ? [sceneImage!] : null) as ui.Shader;
+      } catch (_) {}
+    }
+
+    if (shader == null) {
+      // Fallback background
+      final bgPaint = Paint()..color = Colors.blueGrey.shade900;
+      canvas.drawRect(Offset.zero & size, bgPaint);
+      return;
     }
 
     final paint = Paint()..shader = shader;
