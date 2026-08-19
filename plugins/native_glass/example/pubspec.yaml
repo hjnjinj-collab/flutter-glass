@@ -1,0 +1,16 @@
+name: native_glass_example
+description: Example app for native_glass plugin
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ">=2.18.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  native_glass:
+    path: ../
+
+flutter:
+  uses-material-design: true
