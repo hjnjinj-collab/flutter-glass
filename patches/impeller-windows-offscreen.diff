@@ -1,0 +1,27 @@
+*** impeller-windows-offscreen-refraction.diff (patch stub) ***
+
+This is a high-level illustrative patch: it shows conceptual edit locations and pseudocode to add an Offscreen capture pass inside Impeller compositor on Windows (D3D11/ANGLE path). This is not a compile-ready patch; use it as a starting point for a native engine patch.
+
+--- a/impeller/renderer/compositor_win.cpp
++++ b/impeller/renderer/compositor_win.cpp
+@@
+ // Pseudocode insert: allocate an ID3D11Texture2D as an offscreen render target
+- // existing compose code
++ // before composing target layer X (the BackdropGroup), create an offscreen texture
++ ID3D11Texture2D* offscreenTexture = CreateOffscreenTexture(device, width, height, format);
++ BeginRenderPass(offscreenTexture);
++ RenderSubtreeToTarget(subtree);
++ EndRenderPass();
++
++ // Bind offscreenTexture as a shader resource for later pass
++ BindShaderResource("u_backdrop", offscreenTextureSRV);
+@@
+- // existing final composite
++ // Later in pipeline: run ImageFilter.shader / custom fragment program with u_backdrop bound
++ RunShaderPassWithSampler(shader_program_for_liquid_glass, {"u_backdrop": offscreenTextureSRV}, other_uniforms);
++ 
++ // cleanup or reuse offscreenTexture
+
+Notes:
+- The real engine code locations differ: look in impeller/renderer/ and shell/platform/windows where ANGLE/D3D swapchain integration happens.
+- Synchronization details: ensure resource states (D3D11) and cross-queue sync handled. In Vulkan/Metal equivalent code use VkImage/MTLTexture.
