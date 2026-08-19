@@ -1,4 +1,12 @@
+// Update native_glass.cpp to try D3D11 path and fallback to PixelBufferTexture
 #include "native_glass.h"
+#include "d3d11_renderer.h"
+
+#include <flutter/texture_registrar.h>
+#include <flutter/texture_variant.h>
+#include <flutter/pixel_buffer.h>
+#include <flutter/pixel_buffer_texture.h>
+
 #include <thread>
 #include <chrono>
 #include <iostream>
@@ -6,35 +14,84 @@
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 using flutter::EncodableList;
+using flutter::PixelBuffer;
+using flutter::PixelBufferTexture;
 
-class NativeGlassTexture : public flutter::Texture {
+class NativeGlassTextureImpl {
  public:
-  NativeGlassTexture(flutter::TextureRegistrar *registrar)
-      : registrar_(registrar), width_(800), height_(450), texture_id_(0) {
-    // Placeholder: in a full implementation we'd create a GPU-backed texture and manage frames
+  NativeGlassTextureImpl(flutter::TextureRegistrar* registrar, int width, int height)
+      : registrar_(registrar), width_(width), height_(height) {
+    // Try D3D11 renderer
+    renderer_ = std::make_unique<D3D11Renderer>();
+    bool ok = renderer_->Initialize(width_, height_);
+    use_gpu_ = ok;
+
+    if (!use_gpu_) {
+      // Setup PixelBufferTexture fallback (CPU path)
+      FlutterDesktopPixelBuffer buffer = {};
+    }
+
+    StartRenderLoop();
   }
 
-  ~NativeGlassTexture() override = default;
+  ~NativeGlassTextureImpl() { StopRenderLoop(); }
 
-  // Returns a handle that Flutter can use. On Windows desktop, Flutter will use the
-  // texture to composite native content. Implementation depends on the Flutter engine's
-  // desktop embedding API; here we leave placeholders.
-  std::unique_ptr<flutter::TextureVariant> GetTextureVariant() override {
-    // TODO: Return a valid TextureVariant (e.g., PixelBufferTexture or ExternalTexture)
-    return nullptr;
+  int64_t Register() {
+    // Register PixelBufferTexture which calls our callback to fill pixels
+    PixelBufferTexture::CopyCallback copy_callback = [this](PixelBuffer& buffer) -> bool {
+      // Fill pixel buffer (RGBA) either from GPU copy or CPU procedural
+      if (use_gpu_) {
+        std::vector<uint8_t> pixels;
+        if (renderer_->CopyToCPU(pixels)) {
+          // copy into buffer
+          if (buffer.buffer) {
+            memcpy(buffer.buffer, pixels.data(), pixels.size());
+            buffer.width = width_;
+            buffer.height = height_;
+            buffer.format = PixelFormat::kRGBA8888;
+            return true;
+          }
+        }
+      }
+
+      // CPU fallback: generate a simple gradient
+      if (buffer.buffer) {
+        uint8_t* ptr = reinterpret_cast<uint8_t*>(buffer.buffer);
+        for (int y = 0; y < height_; ++y) {
+          for (int x = 0; x < width_; ++x) {
+            int idx = (y * width_ + x) * 4;
+            ptr[idx + 0] = static_cast<uint8_t>((x * 255) / width_); // R
+            ptr[idx + 1] = static_cast<uint8_t>((y * 255) / height_); // G
+            ptr[idx + 2] = 200; // B
+            ptr[idx + 3] = 255; // A
+          }
+        }
+        buffer.width = width_;
+        buffer.height = height_;
+        buffer.format = PixelFormat::kRGBA8888;
+        return true;
+      }
+      return false;
+    };
+
+    pixel_texture_ = std::make_shared<PixelBufferTexture>(copy_callback);
+    auto variant = std::make_unique<flutter::TextureVariant>(pixel_texture_);
+    texture_id_ = registrar_->RegisterTexture(std::move(variant));
+    return texture_id_;
   }
 
-  // Start a render thread that updates the native texture and notifies Flutter via
-  // registrar_->MarkTextureFrameAvailable or equivalent.
   void StartRenderLoop() {
     running_ = true;
     thread_ = std::thread([this]() {
+      float t = 0.0f;
       while (running_) {
-        // TODO: Render into GPU texture (D3D11) using shaders (liquid glass pass)
-        // After rendering, notify Flutter that a new frame is available.
-        // Example: registrar_->MarkTextureFrameAvailable(texture_id_);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60fps
+        auto start = std::chrono::high_resolution_clock::now();
+        if (use_gpu_) renderer_->Render(t);
+        // notify Flutter a frame is available
+        registrar_->MarkTextureFrameAvailable(texture_id_);
+        t += 0.016f;
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        (void)start;
       }
     });
   }
@@ -45,19 +102,21 @@ class NativeGlassTexture : public flutter::Texture {
   }
 
  private:
-  flutter::TextureRegistrar *registrar_;
+  flutter::TextureRegistrar* registrar_;
   int width_;
   int height_;
-  int64_t texture_id_;
+  std::unique_ptr<D3D11Renderer> renderer_;
+  bool use_gpu_ = false;
+  std::shared_ptr<PixelBufferTexture> pixel_texture_;
+  int64_t texture_id_ = -1;
   std::thread thread_;
   bool running_ = false;
 };
 
+// Plugin wiring
 void NativeGlassPlugin::RegisterWithRegistrar(flutter::PluginRegistrarWindows *registrar) {
-  auto plugin = std::make_unique<NativeGlassPlugin>(registrar);
-  // The plugin instance intentionally leaked to match typical Flutter plugin patterns
-  // where the plugin lifetime == application lifetime.
-  plugin.release();
+  auto plugin = new NativeGlassPlugin(registrar);
+  // intentionally leaked to match simple plugin lifetime
 }
 
 NativeGlassPlugin::NativeGlassPlugin(flutter::PluginRegistrarWindows *registrar)
@@ -71,18 +130,14 @@ NativeGlassPlugin::NativeGlassPlugin(flutter::PluginRegistrarWindows *registrar)
 
   channel_ = std::move(channel);
 
-  // Create texture entry
   auto texture_registrar = registrar_->texture_registrar();
-  texture_entry_ = std::make_unique<NativeGlassTexture>(texture_registrar);
-  // TODO: Register the texture with the texture registrar and save returned id
-  // Example (pseudo): texture_id = texture_registrar->RegisterTexture(texture_entry->GetTextureVariant());
-
-  // Start rendering loop
-  // texture_entry_->StartRenderLoop();
+  texture_impl_ = std::make_unique<NativeGlassTextureImpl>(texture_registrar, 800, 450);
+  int64_t id = texture_impl_->Register();
+  texture_id_ = id;
 }
 
 NativeGlassPlugin::~NativeGlassPlugin() {
-  if (texture_entry_) texture_entry_->StopRenderLoop();
+  if (texture_impl_) texture_impl_.reset();
 }
 
 void NativeGlassPlugin::HandleMethodCall(
@@ -90,15 +145,11 @@ void NativeGlassPlugin::HandleMethodCall(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const std::string method_name = call.method_name();
   if (method_name == "getTextureId") {
-    // TODO: return the texture id assigned when registering the texture
-    // return 0 as placeholder
-    result->Success(flutter::EncodableValue(0));
+    result->Success(flutter::EncodableValue(static_cast<int64_t>(texture_id_)));
   } else if (method_name == "start") {
-    // Start rendering (if not already)
-    // texture_entry_->StartRenderLoop();
+    // TODO: manage start/stop
     result->Success();
   } else if (method_name == "stop") {
-    // texture_entry_->StopRenderLoop();
     result->Success();
   } else {
     result->NotImplemented();
